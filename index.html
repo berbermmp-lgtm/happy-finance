@@ -351,20 +351,21 @@ html[data-page="home"] #view-home,html[data-page="services"] #view-services,html
 })();
 </script>
 <script>
-/* Анімація заголовка: літери падають хаотично, відскакують від кнопок
-   і по одній, у випадковому порядку, збираються в речення. */
+/* v2 — Анімація заголовка: літери падають, відскакують від кнопок,
+   потім по одній, у випадковому порядку, збираються в речення. */
 (function(){
+  var VER = '2';
+  window.__heroFx = {v: VER, ran: false};
   var h1 = document.querySelector('.hero h1');
   if (!h1) return;
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  if (innerWidth < 520) return;                 // на телефоні не гальмуємо
-  if (h1.dataset.fxDone) return;
-  h1.dataset.fxDone = '1';
+  if (h1.dataset.fxVer === VER) return;
+
+  var reduce = false;
+  try { reduce = matchMedia('(prefers-reduced-motion: reduce)').matches; } catch(e){}
+  var narrow = innerWidth < 640;
 
   var style = document.createElement('style');
-  style.textContent =
-    '.fx-ch{display:inline-block;white-space:pre;transform-origin:50% 90%;will-change:transform;backface-visibility:hidden}' +
-    '.fx-sp{white-space:pre}';
+  style.textContent = '.fx-ch{display:inline-block;white-space:pre;transform-origin:50% 90%;will-change:transform;backface-visibility:hidden}';
   document.head.appendChild(style);
 
   function wrap(node){
@@ -372,13 +373,12 @@ html[data-page="home"] #view-home,html[data-page="services"] #view-services,html
     for (var i=0;i<kids.length;i++){
       var c = kids[i];
       if (c.nodeType === 3){
-        var frag = document.createDocumentFragment();
-        var txt = c.textContent;
+        var frag = document.createDocumentFragment(), txt = c.textContent;
         for (var j=0;j<txt.length;j++){
           var ch = txt[j];
           if (ch === '\n' || ch === '\t') continue;
           var s = document.createElement('span');
-          s.className = 'fx-ch' + (ch === ' ' ? ' fx-sp' : '');
+          s.className = 'fx-ch';
           s.textContent = ch;
           frag.appendChild(s);
         }
@@ -389,107 +389,117 @@ html[data-page="home"] #view-home,html[data-page="services"] #view-services,html
     }
   }
 
-  var heightBefore = h1.getBoundingClientRect().height;
-  wrap(h1);
-  var heightAfter = h1.getBoundingClientRect().height;
-  if (Math.abs(heightAfter - heightBefore) > 2){   // верстка поїхала — відкат
-    h1.querySelectorAll('.fx-ch').forEach(function(s){ s.replaceWith(document.createTextNode(s.textContent)); });
-    return;
-  }
+  function run(){
+    h1.dataset.fxVer = VER;
+    window.__heroFx.ran = true;
+    document.documentElement.dataset.heroFx = VER;
 
-  var chars = Array.prototype.slice.call(h1.querySelectorAll('.fx-ch'));
-  var btns = Array.prototype.slice.call(document.querySelectorAll('.hero-actions .btn'));
-  var btnRects = btns.map(function(b){ return b.getBoundingClientRect(); }).filter(function(r){ return r.width > 20; });
+    wrap(h1);
+    var chars = Array.prototype.slice.call(h1.querySelectorAll('.fx-ch'));
+    if (!chars.length) return;
 
-  var items = chars.map(function(el){
-    var r = el.getBoundingClientRect();
-    var ang = (Math.random()*2-1) * 1.1;                 // розкид обертання
-    return {
-      el: el,
-      bx: r.left + r.width/2, by: r.top + r.height/2,
-      w: r.width, h: r.height,
-      x: (Math.random()*2-1) * 130,                     // стартове зміщення — лишаємось у кадрі
-      y: -(h1.getBoundingClientRect().height * (0.75 + Math.random()*0.85)) - 40,
-      vx: (Math.random()*2-1) * 45,
-      vy: 260 + Math.random()*220,
-      rot: ang * 57.3,
-      vrot: (Math.random()*2-1) * 260
-    };
-  });
+    var btns = Array.prototype.slice.call(document.querySelectorAll('.hero-actions .btn'));
+    var btnRects = btns.map(function(b){ return b.getBoundingClientRect(); })
+                      .filter(function(r){ return r.width > 20 && r.height > 10; });
 
-  function paint(it){
-    it.el.style.transform = 'translate3d(' + it.x.toFixed(1) + 'px,' + it.y.toFixed(1) + 'px,0) rotate(' + it.rot.toFixed(1) + 'deg)';
-  }
-  items.forEach(paint);
-
-  var G = 3400, FLOOR_PAD = 18, t0 = performance.now(), phase = 'fall';
-  var assembled = false;
-
-  function floorY(it){
-    var fy = 0;
-    for (var i=0;i<btnRects.length;i++){
-      var b = btnRects[i];
-      if (it.bx + it.x > b.left - 40 && it.bx + it.x < b.right + 40) fy = Math.max(fy, b.bottom + FLOOR_PAD - it.by);
-    }
-    return fy || (h1.getBoundingClientRect().bottom + 90 - it.by);
-  }
-
-  function tick(now){
-    var dt = Math.min(0.05, (now - t0) / 1000 - (tick.last || 0));
-    tick.last = (now - t0) / 1000;
-
-    if (phase === 'fall'){
-      for (var i=0;i<items.length;i++){
-        var it = items[i];
-        it.vy += G * dt;
-        it.y += it.vy * dt;
-        it.x += it.vx * dt;
-        it.rot += it.vrot * dt;
-
-        // відскік від кнопок (верхня грань) і від «підлоги»
-        for (var k=0;k<btnRects.length;k++){
-          var b = btnRects[k];
-          var cx = it.bx + it.x, cy = it.by + it.y;
-          if (cx > b.left - 24 && cx < b.right + 24 && cy > b.top - 24 && cy < b.bottom + 24 && it.vy > 0){
-            it.y -= (cy - (b.top - 24)) * 1.15;
-            it.vy = -Math.abs(it.vy) * (0.42 + Math.random()*0.16);
-            it.vx += (Math.random()*2-1) * 130;
-            it.vrot += (Math.random()*2-1) * 200;
-          }
-        }
-        var fy = floorY(it);
-        if (it.y > fy){
-          it.y = fy;
-          it.vy = -Math.abs(it.vy) * 0.38;
-          it.vx *= 0.82;
-          if (Math.abs(it.vy) < 55){ it.vy = 0; it.vx *= 0.6; }
-        }
-        paint(it);
-      }
-      if (now - t0 > 1000){ phase = 'gather'; startGather(); }
-    }
-    if (!assembled) requestAnimationFrame(tick);
-  }
-
-  function startGather(){
-    var order = items.map(function(_,i){ return i; });
-    for (var i=order.length-1;i>0;i--){ var j = Math.floor(Math.random()*(i+1)); var t = order[i]; order[i]=order[j]; order[j]=t; }
-    var step = Math.min(22, 520 / Math.max(1, items.length));
-    order.forEach(function(idx, n){
-      var it = items[idx];
-      setTimeout(function(){
-        it.el.style.transition = 'transform .62s cubic-bezier(.22,1,.36,1), color .3s';
-        it.el.style.transform = 'translate3d(0,0,0) rotate(0deg)';
-      }, n * step);
+    var hh = h1.getBoundingClientRect().height || 200;
+    var spread = narrow ? 60 : 130;
+    var items = chars.map(function(el){
+      var r = el.getBoundingClientRect();
+      return {
+        el: el,
+        bx: r.left + r.width/2, by: r.top + r.height/2,
+        x: (Math.random()*2-1) * spread,
+        y: -(hh * (0.55 + Math.random()*0.75)) - 30,
+        vx: (Math.random()*2-1) * (narrow ? 30 : 45),
+        vy: 200 + Math.random()*200,
+        rot: (Math.random()*2-1) * 40,
+        vrot: (Math.random()*2-1) * 180
+      };
     });
-    setTimeout(function(){
-      assembled = true;
-      items.forEach(function(it){ it.el.style.willChange = 'auto'; });
-      document.documentElement.classList.add('fx-done');
-    }, items.length * step + 700);
+
+    function paint(it){
+      it.el.style.transform = 'translate3d(' + it.x.toFixed(1) + 'px,' + it.y.toFixed(1) + 'px,0) rotate(' + it.rot.toFixed(1) + 'deg)';
+    }
+    items.forEach(paint);
+
+    var G = 3400, FALL_MS = reduce ? 550 : 950;
+    var t0 = performance.now(), phase = 'fall', done = false, last = 0;
+
+    function floorFor(it){
+      var fy = null, cx = it.bx + it.x;
+      for (var i=0;i<btnRects.length;i++){
+        var b = btnRects[i];
+        if (cx > b.left - 45 && cx < b.right + 45) fy = Math.max(fy === null ? -1e9 : fy, b.bottom + 16 - it.by);
+      }
+      if (fy === null) fy = (h1.getBoundingClientRect().bottom + 110) - it.by;
+      return fy;
+    }
+
+    function tick(now){
+      var t = (now - t0) / 1000, dt = Math.min(0.05, t - last); last = t;
+
+      if (phase === 'fall'){
+        for (var i=0;i<items.length;i++){
+          var it = items[i];
+          it.vy += G * dt;
+          it.y += it.vy * dt;
+          it.x += it.vx * dt;
+          it.rot += it.vrot * dt;
+
+          for (var k=0;k<btnRects.length;k++){
+            var b = btnRects[k], cx = it.bx + it.x, cy = it.by + it.y;
+            if (cx > b.left - 22 && cx < b.right + 22 && cy > b.top - 22 && cy < b.bottom + 22 && it.vy > 0){
+              it.y -= (cy - (b.top - 22)) * 1.2;
+              it.vy = -Math.abs(it.vy) * (0.42 + Math.random()*0.15);
+              it.vx += (Math.random()*2-1) * 120;
+              it.vrot += (Math.random()*2-1) * 160;
+            }
+          }
+          var fy = floorFor(it);
+          if (it.y > fy){
+            it.y = fy;
+            it.vy = -Math.abs(it.vy) * 0.38;
+            it.vx *= 0.82;
+            if (Math.abs(it.vy) < 55){ it.vy = 0; it.vx *= 0.6; }
+          }
+          paint(it);
+        }
+        if (now - t0 > FALL_MS) { phase = 'gather'; gather(); }
+      }
+      if (!done) requestAnimationFrame(tick);
+    }
+
+    function gather(){
+      var order = items.map(function(_,i){ return i; });
+      for (var i=order.length-1;i>0;i--){ var j = Math.floor(Math.random()*(i+1)), t = order[i]; order[i] = order[j]; order[j] = t; }
+      var step = Math.min(24, (narrow ? 320 : 560) / Math.max(1, items.length));
+      order.forEach(function(idx, n){
+        var it = items[idx];
+        setTimeout(function(){
+          it.el.style.transition = 'transform .62s cubic-bezier(.22,1,.36,1)';
+          it.el.style.transform = 'translate3d(0,0,0) rotate(0deg)';
+        }, n * step);
+      });
+      setTimeout(function(){
+        done = true; phase = 'idle';
+        items.forEach(function(it){ it.el.style.willChange = 'auto'; });
+        document.documentElement.classList.add('fx-done');
+        window.__heroFx.done = true;
+      }, items.length * step + 700);
+    }
+
+    requestAnimationFrame(tick);
   }
 
-  requestAnimationFrame(tick);
+  function heroVisible(){ return !!(h1.offsetParent !== null && h1.getClientRects().length); }
+
+  if (heroVisible()) run();
+  else {
+    var tries = 0, iv = setInterval(function(){
+      if (heroVisible() || ++tries > 200){ clearInterval(iv); if (heroVisible()) run(); }
+    }, 150);
+  }
 })();
 </script>
 </body></html>
