@@ -351,21 +351,20 @@ html[data-page="home"] #view-home,html[data-page="services"] #view-services,html
 })();
 </script>
 <script>
-/* v2 — Анімація заголовка: літери падають, відскакують від кнопок,
-   потім по одній, у випадковому порядку, збираються в речення. */
+/* v3 — Hero: літери сиплються у випадковому порядку, падають, відскакують
+   від кнопок, і кожна по черзі опускається на своє місце з підскоком. */
 (function(){
-  var VER = '2';
-  window.__heroFx = {v: VER, ran: false};
+  var VER = '3';
+  window.__heroFx = {v: VER, ran: false, done: false, settled: 0};
   var h1 = document.querySelector('.hero h1');
-  if (!h1) return;
-  if (h1.dataset.fxVer === VER) return;
+  if (!h1 || h1.dataset.fxVer === VER) return;
 
   var reduce = false;
   try { reduce = matchMedia('(prefers-reduced-motion: reduce)').matches; } catch(e){}
   var narrow = innerWidth < 640;
 
   var style = document.createElement('style');
-  style.textContent = '.fx-ch{display:inline-block;white-space:pre;transform-origin:50% 90%;will-change:transform;backface-visibility:hidden}';
+  style.textContent = '.fx-ch{display:inline-block;white-space:pre;transform-origin:50% 90%;will-change:transform,opacity;backface-visibility:hidden;opacity:0;transition:opacity .16s linear}';
   document.head.appendChild(style);
 
   function wrap(node){
@@ -403,19 +402,34 @@ html[data-page="home"] #view-home,html[data-page="services"] #view-services,html
                       .filter(function(r){ return r.width > 20 && r.height > 10; });
 
     var hh = h1.getBoundingClientRect().height || 200;
-    var spread = narrow ? 60 : 130;
-    var items = chars.map(function(el){
+    var spread = narrow ? 55 : 120;
+    var k = reduce ? 0.65 : 1;
+
+    // випадковий порядок приземлення
+    var order = chars.map(function(_,i){ return i; });
+    for (var i=order.length-1;i>0;i--){ var j = Math.floor(Math.random()*(i+1)), t = order[i]; order[i] = order[j]; order[j] = t; }
+
+    var items = chars.map(function(el, i){
       var r = el.getBoundingClientRect();
       return {
         el: el,
         bx: r.left + r.width/2, by: r.top + r.height/2,
         x: (Math.random()*2-1) * spread,
-        y: -(hh * (0.55 + Math.random()*0.75)) - 30,
-        vx: (Math.random()*2-1) * (narrow ? 30 : 45),
-        vy: 200 + Math.random()*200,
-        rot: (Math.random()*2-1) * 40,
-        vrot: (Math.random()*2-1) * 180
+        y: -(hh * (0.5 + Math.random()*0.8)) - 30,
+        vx: (Math.random()*2-1) * (narrow ? 26 : 40),
+        vy: 0,
+        rot: (Math.random()*2-1) * 36,
+        vrot: (Math.random()*2-1) * 170,
+        mode: 'wait',
+        tStart: (Math.random()*430) * k,                 // коли літера починає падати
+        tLand: 0,
+        bounces: 0,
+        settled: false
       };
+    });
+
+    order.forEach(function(chIdx, n){
+      items[chIdx].tLand = (760 + n * (narrow ? 34 : 42) + Math.random()*150) * k;
     });
 
     function paint(it){
@@ -423,8 +437,7 @@ html[data-page="home"] #view-home,html[data-page="services"] #view-services,html
     }
     items.forEach(paint);
 
-    var G = 3400, FALL_MS = reduce ? 550 : 950;
-    var t0 = performance.now(), phase = 'fall', done = false, last = 0;
+    var G = 3300, t0 = performance.now(), last = 0, allDone = false;
 
     function floorFor(it){
       var fy = null, cx = it.bx + it.x;
@@ -436,64 +449,93 @@ html[data-page="home"] #view-home,html[data-page="services"] #view-services,html
       return fy;
     }
 
-    function tick(now){
-      var t = (now - t0) / 1000, dt = Math.min(0.05, t - last); last = t;
+    function settle(it){
+      if (it.settled) return;
+      it.x = 0; it.y = 0; it.rot = 0;
+      it.el.style.transition = 'transform .16s ease-out, opacity .16s';
+      it.el.style.transform = 'translate3d(0px, 0px, 0px) rotate(0deg)';
+      it.settled = true; it.mode = 'done';
+      window.__heroFx.settled++;
+    }
 
-      if (phase === 'fall'){
-        for (var i=0;i<items.length;i++){
-          var it = items[i];
+    function tick(now){
+      var t = (now - t0) / 1000, dt = Math.min(0.045, t - last); last = t;
+      var pending = 0;
+
+      for (var i=0;i<items.length;i++){
+        var it = items[i];
+        if (it.settled) continue;
+        pending++;
+
+        if (it.mode === 'wait'){
+          if (t * 1000 < it.tStart) { paint(it); continue; }
+          it.mode = 'fall';
+          it.el.style.opacity = '1';
+          it.vy = 260 + Math.random()*220;
+        }
+
+        if (it.mode === 'fall'){
           it.vy += G * dt;
           it.y += it.vy * dt;
           it.x += it.vx * dt;
           it.rot += it.vrot * dt;
 
-          for (var k=0;k<btnRects.length;k++){
-            var b = btnRects[k], cx = it.bx + it.x, cy = it.by + it.y;
-            if (cx > b.left - 22 && cx < b.right + 22 && cy > b.top - 22 && cy < b.bottom + 22 && it.vy > 0){
-              it.y -= (cy - (b.top - 22)) * 1.2;
-              it.vy = -Math.abs(it.vy) * (0.42 + Math.random()*0.15);
-              it.vx += (Math.random()*2-1) * 120;
-              it.vrot += (Math.random()*2-1) * 160;
+          for (var b2=0;b2<btnRects.length;b2++){
+            var b = btnRects[b2], cx = it.bx + it.x, cy = it.by + it.y;
+            if (cx > b.left - 20 && cx < b.right + 20 && cy > b.top - 20 && cy < b.bottom + 20 && it.vy > 0){
+              it.y -= (cy - (b.top - 20)) * 1.2;
+              it.vy = -Math.abs(it.vy) * (0.4 + Math.random()*0.15);
+              it.vx += (Math.random()*2-1) * 110;
+              it.vrot += (Math.random()*2-1) * 140;
             }
           }
           var fy = floorFor(it);
           if (it.y > fy){
             it.y = fy;
-            it.vy = -Math.abs(it.vy) * 0.38;
-            it.vx *= 0.82;
-            if (Math.abs(it.vy) < 55){ it.vy = 0; it.vx *= 0.6; }
+            it.vy = -Math.abs(it.vy) * 0.36;
+            it.vx *= 0.8;
           }
-          paint(it);
-        }
-        if (now - t0 > FALL_MS) { phase = 'gather'; gather(); }
-      }
-      if (!done) requestAnimationFrame(tick);
-    }
+          if (t * 1000 >= it.tLand){
+            it.mode = 'land';
+            it.vy = -(140 + Math.random()*180);      // легкий підскок перед приземленням
+          }
+        } else if (it.mode === 'land'){
+          // горизонтально тягнеться до своєї літери, вертикально падає на неї
+          it.vx += (0 - it.x) * 22 * dt;
+          it.vx *= 0.9;
+          it.x += it.vx * dt;
+          it.vy += G * dt;
+          it.y += it.vy * dt;
+          it.rot += (0 - it.rot) * 9 * dt;
 
-    function gather(){
-      var order = items.map(function(_,i){ return i; });
-      for (var i=order.length-1;i>0;i--){ var j = Math.floor(Math.random()*(i+1)), t = order[i]; order[i] = order[j]; order[j] = t; }
-      var step = Math.min(24, (narrow ? 320 : 560) / Math.max(1, items.length));
-      order.forEach(function(idx, n){
-        var it = items[idx];
-        setTimeout(function(){
-          it.el.style.transition = 'transform .62s cubic-bezier(.22,1,.36,1)';
-          it.el.style.transform = 'translate3d(0,0,0) rotate(0deg)';
-        }, n * step);
-      });
-      setTimeout(function(){
-        done = true; phase = 'idle';
+          if (it.y >= 0 && it.vy > 0){
+            it.y = 0;
+            it.vy = -it.vy * 0.34;
+            it.bounces++;
+            if (it.bounces >= 2 || Math.abs(it.vy) < 48){
+              if (Math.abs(it.x) < 8) { settle(it); }
+              else { it.vy = -Math.abs(it.vy) - 60; }
+            }
+          }
+          if (Math.abs(it.x) < 3 && it.y === 0 && Math.abs(it.vy) < 22 && it.bounces >= 1) settle(it);
+        }
+
+        paint(it);
+      }
+
+      if (pending === 0 && !allDone){
+        allDone = true;
         items.forEach(function(it){ it.el.style.willChange = 'auto'; });
         document.documentElement.classList.add('fx-done');
         window.__heroFx.done = true;
-      }, items.length * step + 700);
+      }
+      if (!allDone) requestAnimationFrame(tick);
     }
 
     requestAnimationFrame(tick);
   }
 
   function heroVisible(){ return !!(h1.offsetParent !== null && h1.getClientRects().length); }
-
   if (heroVisible()) run();
   else {
     var tries = 0, iv = setInterval(function(){
